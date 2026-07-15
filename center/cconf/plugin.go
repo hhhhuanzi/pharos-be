@@ -67,4 +67,16 @@ var Plugins = []Plugin{
 		Type:     "iotdb",
 		TypeName: "IoTDB",
 	},
+	{
+		Id:       12,
+		Category: "tracing",
+		Type:     "jaeger",
+		TypeName: "Jaeger",
+	},
+	{
+		Id:       13,
+		Category: "tracing",
+		Type:     "skywalking",
+		TypeName: "SkyWalking",
+	},
 }

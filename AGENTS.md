@@ -32,6 +32,12 @@
 - DB：跟官方 `models/migrate` 风格增量迁移，**不手改绕过 migrate**
 - 工作流同前端：`main` 追 upstream；功能在 `feature_link`
 
+## Tracing 扩展（链路）
+
+- 与前端对齐：tracing 类数据源只需在 `center/cconf/plugin.go` 注册 Plugins 元数据，查询走现有 `/proxy/:id/*`
+- **不必**为只读链路 MVP 新增 `RegisterDatasource` / 告警 eval
+- 若日后需要服务端 GraphQL 编排，再新增 `center/router/router_dh_*.go`
+
 ## Commit 与版本对齐
 
 - 前缀建议：`feat(dh):` / `fix(dh):` / `chore(dh):`
