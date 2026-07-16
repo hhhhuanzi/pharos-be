@@ -122,6 +122,8 @@ ops:
       cname: Recording Rule - Delete
     - name: /log/explorer
       cname: Logs Explorer
+    - name: /trace/explorer
+      cname: Traces Explorer
     - name: /log/index-patterns # 前端有个管理索引模式的页面，所以需要一个权限点来控制，后面应该改成侧拉板
       cname: Index Pattern - View
     - name: /log/index-patterns/add
