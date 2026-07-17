@@ -1,4 +1,4 @@
-# Codex / Agent Instructions — dh-nightingale 二开隔离
+# Codex / Agent Instructions — pharos-be 二开隔离
 
 > 本地 Cursor 另有始终生效规则：`.cursor/rules/dh-second-dev.mdc`（该目录被 `.gitignore` 忽略，克隆后需自行保留/同步）。
 
