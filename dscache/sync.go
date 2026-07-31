@@ -12,11 +12,13 @@ import (
 	_ "github.com/ccfos/nightingale/v6/datasource/doris"
 	"github.com/ccfos/nightingale/v6/datasource/es"
 	_ "github.com/ccfos/nightingale/v6/datasource/iotdb"
+	_ "github.com/ccfos/nightingale/v6/datasource/loki"
 	_ "github.com/ccfos/nightingale/v6/datasource/mysql"
 	_ "github.com/ccfos/nightingale/v6/datasource/opensearch"
 	_ "github.com/ccfos/nightingale/v6/datasource/postgresql"
 	_ "github.com/ccfos/nightingale/v6/datasource/victorialogs"
 	iotdbkit "github.com/ccfos/nightingale/v6/dskit/iotdb"
+	lokikit "github.com/ccfos/nightingale/v6/dskit/loki"
 	"github.com/ccfos/nightingale/v6/dskit/tdengine"
 	"github.com/ccfos/nightingale/v6/models"
 	"github.com/ccfos/nightingale/v6/pkg/ctx"
@@ -106,6 +108,13 @@ func getDatasourcesFromDBLoop(ctx *ctx.Context, fromAPI bool) {
 			var dss []datasource.DatasourceInfo
 			for _, item := range items {
 
+				// disabled 数据源不建立运行时查询 client：既符合「禁用」语义，也避免导入的待补充鉴权
+				// (pending_auth) 源每 2s 反复 InitClient，堆积连接/goroutine/DB 句柄。排除后
+				// 它们不进 PutDatasources 的 validIds，已注册的会被一并从缓存移除。
+				if item.Status == "disabled" {
+					continue
+				}
+
 				if item.PluginType == "prometheus" && item.IsDefault {
 					atomic.StoreInt64(&PromDefaultDatasourceId, item.Id)
 					foundDefaultDatasource = true
@@ -134,6 +143,8 @@ func getDatasourcesFromDBLoop(ctx *ctx.Context, fromAPI bool) {
 					tdN9eToDatasourceInfo(&ds, item)
 				} else if item.PluginType == "iotdb" {
 					iotdbN9eToDatasourceInfo(&ds, item)
+				} else if item.PluginType == "loki" {
+					lokiN9eToDatasourceInfo(&ds, item)
 				} else {
 					ds.Settings = make(map[string]interface{})
 					for k, v := range item.SettingsJson {
@@ -190,6 +201,28 @@ func iotdbN9eToDatasourceInfo(ds *datasource.DatasourceInfo, item models.Datasou
 	}
 }
 
+func lokiN9eToDatasourceInfo(ds *datasource.DatasourceInfo, item models.Datasource) {
+	ds.Settings = make(map[string]interface{})
+	for k, v := range item.SettingsJson {
+		ds.Settings[k] = v
+	}
+
+	ds.Settings["loki.cluster_name"] = item.ClusterName
+	ds.Settings["loki.addr"] = item.HTTPJson.Url
+	ds.Settings["loki.timeout"] = item.HTTPJson.Timeout
+	ds.Settings["loki.dial_timeout"] = item.HTTPJson.DialTimeout
+	ds.Settings["loki.max_idle_conns_per_host"] = item.HTTPJson.MaxIdleConnsPerHost
+	ds.Settings["loki.headers"] = item.HTTPJson.Headers
+	ds.Settings["loki.tls"] = lokikit.LokiTLS{
+		SkipTlsVerify: item.HTTPJson.TLS.SkipTlsVerify,
+	}
+	ds.Settings["loki.basic"] = lokikit.LokiBasicAuth{
+		LokiUser:      item.AuthJson.BasicAuthUser,
+		LokiPass:      item.AuthJson.BasicAuthPassword,
+		LokiIsEncrypt: false,
+	}
+}
+
 func esN9eToDatasourceInfo(ds *datasource.DatasourceInfo, item models.Datasource) {
 	ds.Settings = make(map[string]interface{})
 	ds.Settings["es.nodes"] = []string{item.HTTPJson.Url}
@@ -218,10 +251,6 @@ func PutDatasources(items []datasource.DatasourceInfo) {
 
 	for _, item := range items {
 		if item.Type == "prometheus" {
-			continue
-		}
-
-		if item.Type == "loki" {
 			continue
 		}
 

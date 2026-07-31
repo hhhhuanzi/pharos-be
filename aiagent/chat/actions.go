@@ -260,8 +260,8 @@ Guidelines:
 }
 
 // ContextForwardInputs forwards structured context (busi_group_id,
-// datasource_id, team_ids) to the agent as tool params, so tools like
-// create_alert_rule / create_dashboard can read them via getDatasourceId etc.
+// datasource_id, team_ids, skill_scope) to the agent as tool params, so tools
+// like create_alert_rule / create_dashboard can read them via getDatasourceId etc.
 // without relying on the LLM to thread them through arguments.
 //
 // router 对所有 action 默认调用本函数：写工具缺参门（tools/form_gate.go）的
@@ -282,6 +282,18 @@ func ContextForwardInputs(req *AIChatRequest) map[string]string {
 			parts[i] = fmt.Sprintf("%d", id)
 		}
 		inputs["team_ids"] = strings.Join(parts, ",")
+	}
+	// 创建技能的授权表单：管理团队与可见范围用技能专属键转发，不与通知规则的 team_ids
+	// 混用——create_skill 靠这个键判断本轮是不是自己那张表单的续跑（见 restoreSkillDraft）。
+	if ids := ctxInt64Slice(req.Context, aiagent.SkillTeamsFieldKey); len(ids) > 0 {
+		parts := make([]string, len(ids))
+		for i, id := range ids {
+			parts[i] = fmt.Sprintf("%d", id)
+		}
+		inputs[aiagent.SkillTeamsFieldKey] = strings.Join(parts, ",")
+	}
+	if id := ctxInt64(req.Context, aiagent.SkillScopeFieldKey); id > 0 {
+		inputs[aiagent.SkillScopeFieldKey] = fmt.Sprintf("%d", id)
 	}
 	return inputs
 }
@@ -318,6 +330,12 @@ func selectGeneralChatTools(req *AIChatRequest) []string {
 		// 这里取证, 不能凭训练记忆答 — 否则会编 Severity=Critical / Authorization
 		// Bearer / ping_result_code / [[inputs.xxx]] 等不存在的标识符。
 		"search_n9e_docs",
+		// 代码语料检索（只读，仅 qa_code_embed 构建有内容，缺语料时工具自报降级）。
+		// 与 search_n9e_docs 同一动机：文档没覆盖到的具体标识符要能从源码取证。
+		// 挂进基线而不是只留给 doc-qa 的另一个原因是"能力自述"——工具表里没有它
+		// 时，模型面对"你能读源码吗"会照着 read_file 的描述斩钉截铁否认，而实际
+		// 上语料就在盘上，用户看到的是产品在说假话。
+		"list_code", "search_code", "read_code",
 		// 写操作（创建/编辑）。历史上通用路径不暴露写工具——"没有 preflight 保护，
 		// 缺 busi_group_id 会误建"。该约束已由工具级缺参门解除（agent-routing-
 		// contraction §3）：create/import 工具缺业务组(通知规则为团队)时返回 input

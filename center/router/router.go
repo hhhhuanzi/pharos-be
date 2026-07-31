@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/ccfos/nightingale/v6/pkg/version"
 	"github.com/ccfos/nightingale/v6/prom"
 	"github.com/ccfos/nightingale/v6/pushgw/idents"
+	"github.com/ccfos/nightingale/v6/pushgw/pconf"
 	"github.com/ccfos/nightingale/v6/storage"
 	"gorm.io/gorm"
 
@@ -60,6 +62,13 @@ type Router struct {
 	Ctx               *ctx.Context
 	LogDir            string
 
+	// Pushgw is this deployment's forwarding config. It is only read to answer
+	// "which datasource do host metrics end up in" (categrafMeta), so it is set
+	// after New() rather than taken as a parameter — an embedder that never
+	// sets it just gets an empty writer list and the UI falls back to letting
+	// the user pick the datasource.
+	Pushgw pconf.Pushgw
+
 	// Sandbox is the Skill script-execution isolation controller (pkg/sandbox).
 	// Built once at New() from the configured capabilities; nil-safe (a disabled
 	// sandbox simply makes run_skill_script report "execution unavailable").
@@ -78,6 +87,12 @@ type Router struct {
 	// additional MCP toolsets on /mcp beyond n9e-mcp-server's defaults. Set it
 	// before Config(r); the registrars run when the /mcp handler is built.
 	MCPExtraToolsets []a2a.MCPToolsetRegistrar
+
+	// AgentToolSourcesHook lets an embedder contribute per-run external tool
+	// sources to AI chat (e.g. the enterprise edition's MCP client translates
+	// the agent's bound MCP servers into sources, scoped to the chatting user).
+	// nil means agents run with no external tool sources.
+	AgentToolSourcesHook func(agent *models.AIAgent, me *models.User) []aiagent.ToolSource
 
 	// aiSkillSyncOnce ensures the DB→FS full sync runs at most once per process
 	// lifetime (startup goroutine + first chat handler both call through the
@@ -149,6 +164,14 @@ func New(httpConfig httpx.Config, center cconf.Center, alert aconf.Alert, ibex c
 	if skillsPath := rt.Center.AIAgent.SkillsPath; skillsPath != "" {
 		if err := skill.ExtractBuiltin(skillsPath); err != nil {
 			logger.Warningf("extract builtin skills to %s failed: %v", skillsPath, err)
+		}
+		// QA 代码语料（仅 -tags qa_code_embed 构建内嵌，默认构建 no-op）：释放到
+		// skillsPath 父目录下的 code/（与 integrations/ 同级），list_code /
+		// search_code / read_code 工具以同一锚点定位。失败仅降级 QA，不致命。
+		if abs, err := filepath.Abs(skillsPath); err == nil {
+			if err := skill.ExtractCodeCorpus(filepath.Dir(abs)); err != nil {
+				logger.Warningf("extract QA code corpus failed: %v", err)
+			}
 		}
 	}
 
@@ -273,6 +296,13 @@ func (rt *Router) Config(r *gin.Engine) {
 			pages.POST("/iotdb-databases", rt.iotdbDatabases)
 			pages.POST("/iotdb-tables", rt.iotdbTables)
 			pages.POST("/iotdb-columns", rt.iotdbColumns)
+			pages.POST("/victorialogs-histogram", rt.QueryVictoriaLogsHistogram)
+			pages.POST("/victorialogs-field-names", rt.QueryVictoriaLogsFieldNames)
+			pages.POST("/victorialogs-field-values", rt.QueryVictoriaLogsFieldValues)
+			pages.POST("/loki-label-names", rt.QueryLokiLabelNames)
+			pages.POST("/loki-label-values", rt.QueryLokiLabelValues)
+			pages.POST("/loki-parsed-fields", rt.QueryLokiParsedFields)
+			pages.POST("/loki-histogram", rt.QueryLokiHistogram)
 
 			pages.POST("/log-query-batch", rt.QueryLogBatch)
 
@@ -303,6 +333,13 @@ func (rt *Router) Config(r *gin.Engine) {
 			pages.POST("/iotdb-databases", rt.auth(), rt.iotdbDatabases)
 			pages.POST("/iotdb-tables", rt.auth(), rt.iotdbTables)
 			pages.POST("/iotdb-columns", rt.auth(), rt.iotdbColumns)
+			pages.POST("/victorialogs-histogram", rt.auth(), rt.user(), rt.QueryVictoriaLogsHistogram)
+			pages.POST("/victorialogs-field-names", rt.auth(), rt.user(), rt.QueryVictoriaLogsFieldNames)
+			pages.POST("/victorialogs-field-values", rt.auth(), rt.user(), rt.QueryVictoriaLogsFieldValues)
+			pages.POST("/loki-label-names", rt.auth(), rt.user(), rt.QueryLokiLabelNames)
+			pages.POST("/loki-label-values", rt.auth(), rt.user(), rt.QueryLokiLabelValues)
+			pages.POST("/loki-parsed-fields", rt.auth(), rt.user(), rt.QueryLokiParsedFields)
+			pages.POST("/loki-histogram", rt.auth(), rt.user(), rt.QueryLokiHistogram)
 
 			pages.POST("/log-query-batch", rt.auth(), rt.user(), rt.QueryLogBatch)
 
@@ -430,6 +467,15 @@ func (rt *Router) Config(r *gin.Engine) {
 
 		pages.GET("/integrations/icon/:cate/:name", rt.builtinIcon)
 
+		// Categraf install helpers. Anonymous on purpose: the target machine
+		// runs these before it holds any credential, and none of the three
+		// returns anything the caller did not already supply or that is not
+		// public software. Same posture as /pub and /site-info.
+		pages.GET("/agents/categraf/meta", rt.categrafMeta)
+		pages.GET("/agents/categraf/install.sh", rt.categrafInstallScript)
+		pages.GET("/agents/categraf/collect.sh", rt.categrafCollectScript)
+		pages.GET("/agents/categraf/download", rt.categrafDownload)
+
 		// pages.GET("/builtin-boards", rt.builtinBoardGets)
 		// pages.GET("/builtin-board/:name", rt.builtinBoardGet)
 		// pages.GET("/dashboards/builtin/list", rt.builtinBoardGets)
@@ -482,6 +528,7 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.POST("/busi-groups/alert-rules/clones", rt.auth(), rt.user(), rt.perm("/alert-rules/add"), rt.batchAlertRuleClone)
 		pages.POST("/busi-group/alert-rules/notify-tryrun", rt.auth(), rt.user(), rt.perm("/alert-rules/add"), rt.alertRuleNotifyTryRun)
 		pages.POST("/busi-group/alert-rules/enable-tryrun", rt.auth(), rt.user(), rt.perm("/alert-rules/add"), rt.alertRuleEnableTryRun)
+		pages.POST("/busi-group/:id/alert-rule/test-fire", rt.auth(), rt.user(), rt.perm("/alert-rules/add"), rt.bgrw(), rt.alertRuleTestFire)
 
 		pages.GET("/busi-groups/recording-rules", rt.auth(), rt.user(), rt.perm("/recording-rules"), rt.recordingRuleGetsByGids)
 		pages.GET("/busi-group/:id/recording-rules", rt.auth(), rt.user(), rt.perm("/recording-rules"), rt.recordingRuleGets)
@@ -545,12 +592,14 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.GET("/busi-group/:id/tasks", rt.auth(), rt.user(), rt.perm("/job-tasks"), rt.bgro(), rt.taskGets)
 		pages.POST("/busi-group/:id/tasks", rt.auth(), rt.user(), rt.perm("/job-tasks/add"), rt.bgrw(), rt.taskAdd)
 
-		pages.GET("/servers", rt.auth(), rt.user(), rt.perm("/help/servers"), rt.serversGet)
+		pages.GET("/servers", rt.auth(), rt.user(), rt.perm("/system/alerting-engines"), rt.serversGet)
 		pages.GET("/server-clusters", rt.auth(), rt.user(), rt.serverClustersGet)
 
 		pages.POST("/datasource/list", rt.auth(), rt.user(), rt.datasourceList)
 		pages.POST("/datasource/plugin/list", rt.auth(), rt.pluginList)
 		pages.POST("/datasource/upsert", rt.auth(), rt.admin(), rt.datasourceUpsert)
+		pages.POST("/datasource/grafana/fetch", rt.auth(), rt.admin(), rt.datasourceGrafanaFetch)
+		pages.POST("/datasource/grafana/import", rt.auth(), rt.admin(), rt.datasourceGrafanaImport)
 		pages.POST("/datasource/desc", rt.auth(), rt.admin(), rt.datasourceGet)
 		pages.POST("/datasource/status/update", rt.auth(), rt.admin(), rt.datasourceUpdataStatus)
 		pages.DELETE("/datasource/", rt.auth(), rt.admin(), rt.datasourceDel)
@@ -609,10 +658,10 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.PUT("/embedded-product/:id", rt.auth(), rt.user(), rt.perm("/embedded-product/put"), rt.embeddedProductPut)
 		pages.DELETE("/embedded-product/:id", rt.auth(), rt.user(), rt.perm("/embedded-product/delete"), rt.embeddedProductDelete)
 
-		pages.GET("/user-variable-configs", rt.auth(), rt.user(), rt.perm("/help/variable-configs"), rt.userVariableConfigGets)
-		pages.POST("/user-variable-config", rt.auth(), rt.user(), rt.perm("/help/variable-configs"), rt.userVariableConfigAdd)
-		pages.PUT("/user-variable-config/:id", rt.auth(), rt.user(), rt.perm("/help/variable-configs"), rt.userVariableConfigPut)
-		pages.DELETE("/user-variable-config/:id", rt.auth(), rt.user(), rt.perm("/help/variable-configs"), rt.userVariableConfigDel)
+		pages.GET("/user-variable-configs", rt.auth(), rt.user(), rt.perm("/system/variable-settings"), rt.userVariableConfigGets)
+		pages.POST("/user-variable-config", rt.auth(), rt.user(), rt.perm("/system/variable-settings"), rt.userVariableConfigAdd)
+		pages.PUT("/user-variable-config/:id", rt.auth(), rt.user(), rt.perm("/system/variable-settings"), rt.userVariableConfigPut)
+		pages.DELETE("/user-variable-config/:id", rt.auth(), rt.user(), rt.perm("/system/variable-settings"), rt.userVariableConfigDel)
 
 		pages.GET("/config", rt.auth(), rt.admin(), rt.configGetByKey)
 		pages.PUT("/config", rt.auth(), rt.admin(), rt.configPutByKey)
@@ -644,22 +693,6 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.POST("/ai-skill/:id/git/update", rt.auth(), rt.user(), rt.perm("/ai-config/skills"), rt.aiSkillGitUpdate)
 		pages.GET("/ai-skill-file/:fileId", rt.auth(), rt.user(), rt.perm("/ai-config/skills"), rt.aiSkillFileGet)
 		pages.DELETE("/ai-skill-file/:fileId", rt.auth(), rt.user(), rt.perm("/ai-config/skills"), rt.aiSkillFileDel)
-
-		pages.GET("/mcp-servers", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerGets)
-		pages.GET("/mcp-server/:id", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerGet)
-		pages.POST("/mcp-servers", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerAdd)
-		pages.PUT("/mcp-server/:id", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerPut)
-		pages.DELETE("/mcp-server/:id", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerDel)
-		pages.POST("/mcp-server/test", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerTest)
-		pages.GET("/mcp-server/:id/tools", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerTools)
-
-		// Outbound MCP client OAuth. The callback is the vendor's browser redirect
-		// target, so it is public (no session token); it is guarded by the signed
-		// one-time state stored at prepare time.
-		pages.POST("/mcp-server-oauth/prepare", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerOAuthPrepare)
-		pages.GET("/mcp-server-oauth/status", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerOAuthStatus)
-		pages.POST("/mcp-server-oauth/disconnect", rt.auth(), rt.user(), rt.perm("/ai-config/mcp-servers"), rt.mcpServerOAuthDisconnect)
-		pages.GET("/mcp-server-oauth/callback", rt.mcpServerOAuthCallback)
 
 		// AI Assistant Chat
 		pages.POST("/assistant/chat/new", rt.auth(), rt.user(), rt.assistantChatNew)
@@ -716,6 +749,7 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.GET("/event-pipelines", rt.auth(), rt.user(), rt.perm("/event-pipelines"), rt.eventPipelinesList)
 		pages.POST("/event-pipeline", rt.auth(), rt.user(), rt.perm("/event-pipelines/add"), rt.addEventPipeline)
 		pages.PUT("/event-pipeline", rt.auth(), rt.user(), rt.perm("/event-pipelines/put"), rt.updateEventPipeline)
+		pages.PUT("/event-pipelines/disabled", rt.auth(), rt.user(), rt.perm("/event-pipelines/put"), rt.updateEventPipelinesDisabled)
 		pages.GET("/event-pipeline/:id", rt.auth(), rt.user(), rt.perm("/event-pipelines"), rt.getEventPipeline)
 		pages.DELETE("/event-pipelines", rt.auth(), rt.user(), rt.perm("/event-pipelines/del"), rt.deleteEventPipelines)
 		pages.POST("/event-pipeline-tryrun", rt.auth(), rt.user(), rt.perm("/event-pipelines"), rt.tryRunEventPipeline)
@@ -883,6 +917,7 @@ func (rt *Router) Config(r *gin.Engine) {
 			service.GET("/builtin-payloads", rt.builtinPayloadsGets)
 
 			service.GET("/ai-skills", rt.aiSkillGets)
+			service.GET("/ai-skills/visible", rt.aiSkillVisibleGetsByService)
 			service.GET("/ai-skill/:id", rt.aiSkillGetWithFileContents)
 			service.POST("/ai-skills", rt.aiSkillAddByService)
 			service.POST("/ai-skills/import", rt.aiSkillImportByService)
