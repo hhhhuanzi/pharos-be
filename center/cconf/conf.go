@@ -19,6 +19,7 @@ type Center struct {
 	I18NHeaderKey             string
 	MetricDesc                MetricDescType
 	AnonymousAccess           AnonymousAccess
+	DhProxyGuard              DhProxyGuard
 	UseFileAssets             bool
 	FlashDuty                 FlashDuty
 	EventHistoryGroupView     bool
@@ -26,6 +27,9 @@ type Center struct {
 	CleanPipelineExecutionDay int
 	// CleanAlertHisEventDay 历史告警事件保留天数，<= 0 表示永久保留不清理
 	CleanAlertHisEventDay int
+	// CleanOperationLogDay 操作审计日志（operation_log 表）保留天数，dh 二开，
+	// <= 0 时 cron.CleanOperationLog 会回退到默认值 90 天，见该函数注释
+	CleanOperationLogDay  int
 	MigrateBusiGroupLabel bool
 	RSA                   httpx.RSAConfig
 	AIAgent               AIAgent

@@ -143,10 +143,28 @@ I18NHeaderKey = "X-Language"
 # events older than this are deleted in batches daily at 02:00
 # <= 0 means keep forever (default)
 # CleanAlertHisEventDay = 365
+# dh: retention days of the operation audit log (table: operation_log, see
+# pkg/dh/audit). <= 0 falls back to the built-in default of 90 days.
+# CleanOperationLogDay = 90
 
 [Center.AnonymousAccess]
+# 风险提示（dh）：PromQuerier = true 会让 /ds-query、/query-range-batch、
+# /datasource/brief 等一批查询接口免登录（官方为匿名大屏场景保留的设计）。
+# 反向代理 /proxy/:id/*url 已不再受本开关控制，改由下面的 Center.DhProxyGuard 管。
 PromQuerier = true
 AlertDetail = true
+
+# dh 二开：反向代理 /proxy/:id/*url 的匿名放行开关。
+# 默认（不配置本节）= 该路由要求登录 + 数据源权限校验。
+# 打开 AllowAnonymous 等于恢复官方老行为：未登录即可借代理直连数据源，且转发请求会带上
+# 数据源里配置的 basic auth 凭据。确需匿名（如公开大盘用到的 Prometheus label/series
+# 元数据接口）时，务必用下面两项收敛到最小面。
+# [Center.DhProxyGuard]
+# AllowAnonymous = false
+# 匿名可访问的数据源 id 白名单，留空 = 不限制（风险最高）
+# AnonymousDatasourceIds = []
+# 匿名可用的 HTTP 方法，留空 = 不限制
+# AnonymousMethods = ["GET", "HEAD"]
 
 [EmbeddedTSDB]
 # built-in time series database. When enabled, metrics pushed by categraf are

@@ -188,6 +188,7 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 	go cron.CleanNotifyRecord(ctx, config.Center.CleanNotifyRecordDay)
 	go cron.CleanPipelineExecution(ctx, config.Center.CleanPipelineExecutionDay)
 	go cron.CleanAlertHisEvent(ctx, config.Center.CleanAlertHisEventDay)
+	go cron.CleanOperationLog(ctx, config.Center.CleanOperationLogDay) // dh: 操作审计日志清理，见 ROADMAP.md G-11
 
 	alertrtRouter := alertrt.New(config.HTTP, config.Alert, alertMuteCache, targetCache, busiGroupCache, alertStats, ctx, externalProcessors, config.Log.Dir)
 	centerRouter := centerrt.New(config.HTTP, config.Center, config.Alert, config.Ibex,

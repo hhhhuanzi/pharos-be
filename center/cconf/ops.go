@@ -306,6 +306,8 @@ ops:
       cname: AI Config - LLM Configs
     - name: /ai-config/skills
       cname: AI Config - Skills
+    - name: /audit-log # dh: 操作审计日志查询页权限点，见 ROADMAP.md G-11
+      cname: Audit Log - View
 
 `
 )

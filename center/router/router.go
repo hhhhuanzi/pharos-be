@@ -278,10 +278,14 @@ func (rt *Router) Config(r *gin.Engine) {
 	pagesPrefix := "/api/n9e"
 	pages := r.Group(pagesPrefix)
 	{
+		// dh: 操作审计日志中间件，必须在本路由组的第一行注册（gin 的 group.Use 只对
+		// 注册时机在它之后的路由生效），业务实现见 pkg/dh/audit
+		pages.Use(rt.dhOperationLog())
 
 		pages.DELETE("/datasource/series", rt.auth(), rt.admin(), rt.deleteDatasourceSeries)
+		// dh: 代理路由不再跟随 PromQuerier 分叉，鉴权与匿名放行见 router_dh_proxy.go
+		pages.Any("/proxy/:id/*url", rt.dsProxyGuarded)
 		if rt.Center.AnonymousAccess.PromQuerier {
-			pages.Any("/proxy/:id/*url", rt.dsProxy)
 			pages.POST("/query-range-batch", rt.promBatchQueryRange)
 			pages.POST("/query-instant-batch", rt.promBatchQueryInstant)
 			pages.GET("/datasource/brief", rt.datasourceBriefs)
@@ -318,7 +322,6 @@ func (rt *Router) Config(r *gin.Engine) {
 			pages.POST("/log-query", rt.QueryLog)
 			pages.POST("/es-cluster-info", rt.ESClusterInfo)
 		} else {
-			pages.Any("/proxy/:id/*url", rt.auth(), rt.dsProxy)
 			pages.POST("/query-range-batch", rt.auth(), rt.promBatchQueryRange)
 			pages.POST("/query-instant-batch", rt.auth(), rt.promBatchQueryInstant)
 			pages.GET("/datasource/brief", rt.auth(), rt.user(), rt.datasourceBriefs)
@@ -612,6 +615,10 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.GET("/role/:id/ops", rt.auth(), rt.user(), rt.perm("/roles"), rt.operationOfRole)
 		pages.PUT("/role/:id/ops", rt.auth(), rt.user(), rt.perm("/roles/put"), rt.roleBindOperation)
 		pages.GET("/operation", rt.auth(), rt.user(), rt.operations)
+
+		// dh: 操作审计日志查询，权限判断在 handler 内部做（支持无 /audit-log 权限点的
+		// 普通用户查看自己的操作记录），见 center/router/router_dh_audit.go
+		pages.GET("/audit-logs", rt.auth(), rt.user(), rt.auditLogList)
 
 		pages.GET("/notify-tpls", rt.auth(), rt.user(), rt.notifyTplGets)
 		pages.PUT("/notify-tpl/content", rt.auth(), rt.user(), rt.notifyTplUpdateContent)
