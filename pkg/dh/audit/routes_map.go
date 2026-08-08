@@ -133,6 +133,12 @@ var rules = []routeRule{
 		Module: "业务组", ActionCreate: "新增业务组", ActionUpdate: "更新业务组", ActionDelete: "删除业务组",
 	},
 
+	// 日志导出：数据外带，合规意义上高于普通业务配置变更 —— 高危
+	{
+		Contains: []string{"/log-export"}, ObjectType: "log_export", RiskLevel: RiskHigh,
+		Module: "日志导出", ActionCreate: "导出日志",
+	},
+
 	// 数据源：能拿到凭据、能连去内网 —— 高危
 	{
 		Contains: []string{"/datasource"}, ObjectType: "datasource", RiskLevel: RiskHigh,

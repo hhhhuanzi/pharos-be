@@ -620,6 +620,10 @@ func (rt *Router) Config(r *gin.Engine) {
 		// 普通用户查看自己的操作记录），见 center/router/router_dh_audit.go
 		pages.GET("/audit-logs", rt.auth(), rt.user(), rt.auditLogList)
 
+		// dh: 日志导出埋点接口，见 center/router/router_dh_log_export.go。
+		// 必须在 L283 的 pages.Use(rt.dhOperationLog()) 之后注册，审计中间件才能捕获到。
+		pages.POST("/dh/log-export/record", rt.auth(), rt.user(), rt.perm("/log/export"), rt.dhLogExportRecord)
+
 		pages.GET("/notify-tpls", rt.auth(), rt.user(), rt.notifyTplGets)
 		pages.PUT("/notify-tpl/content", rt.auth(), rt.user(), rt.notifyTplUpdateContent)
 		pages.PUT("/notify-tpl", rt.auth(), rt.user(), rt.notifyTplUpdate)
