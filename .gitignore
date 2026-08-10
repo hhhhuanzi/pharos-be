@@ -89,3 +89,6 @@ n9e.sql
 .env.json
 /aichat-cli
 /a2a-cli
+
+# Local alert eval runtime logs (do not commit)
+/evallog/
