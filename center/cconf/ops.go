@@ -122,6 +122,8 @@ ops:
       cname: Recording Rule - Delete
     - name: /log/explorer
       cname: Logs Explorer
+    - name: /log/export # dh: 日志导出权限点，见 pharos-ops/HANDOFF-log-export.md §11
+      cname: Log Export
     - name: /trace/explorer
       cname: Traces Explorer
     - name: /log/index-patterns # 前端有个管理索引模式的页面，所以需要一个权限点来控制，后面应该改成侧拉板
@@ -308,8 +310,6 @@ ops:
       cname: AI Config - Skills
     - name: /audit-log # dh: 操作审计日志查询页权限点，见 ROADMAP.md G-11
       cname: Audit Log - View
-    - name: /log/export # dh: 日志导出权限点，见 pharos-ops/HANDOFF-log-export.md §11
-      cname: Log Export
 
 `
 )
