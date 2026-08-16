@@ -128,6 +128,8 @@ ops:
       cname: Traces Explorer
     - name: /trace/dependencies # dh: 链路拓扑（轨 B / P-49）
       cname: Traces Dependencies
+    - name: /service # dh: 服务页（1.2 骨架）
+      cname: Service
     - name: /log/index-patterns # 前端有个管理索引模式的页面，所以需要一个权限点来控制，后面应该改成侧拉板
       cname: Index Pattern - View
     - name: /log/index-patterns/add
