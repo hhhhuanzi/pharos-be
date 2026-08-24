@@ -130,6 +130,10 @@ ops:
       cname: Traces Dependencies
     - name: /service # dh: 服务页（1.2 骨架）
       cname: Service
+    - name: /service/view-all # dh: 服务团队可见性 — 看全部（含未关联）
+      cname: Service - View All Teams
+    - name: /service/manage # dh: 服务团队可见性 — 手动关联所属团队
+      cname: Service - Manage Team
     - name: /event-center # dh: 全局事件中心
       cname: Event Center
     - name: /log/index-patterns # 前端有个管理索引模式的页面，所以需要一个权限点来控制，后面应该改成侧拉板

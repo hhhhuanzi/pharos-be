@@ -628,6 +628,14 @@ func (rt *Router) Config(r *gin.Engine) {
 		// 必须在 L283 的 pages.Use(rt.dhOperationLog()) 之后注册，审计中间件才能捕获到。
 		pages.POST("/dh/log-export/record", rt.auth(), rt.user(), rt.perm("/log/export"), rt.dhLogExportRecord)
 
+		// dh: 服务所属团队，见 center/router/router_dh_service_team.go
+		pages.GET("/dh/service-teams/visibility", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamVisibility)
+		pages.POST("/dh/service-teams/filter", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamFilter)
+		pages.GET("/dh/service-teams/check", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamCheck)
+		pages.GET("/dh/service-teams/by-group", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamByGroupGet)
+		pages.PUT("/dh/service-teams/by-group", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamByGroupPut)
+		pages.PUT("/dh/service-teams", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamPut)
+
 		pages.GET("/notify-tpls", rt.auth(), rt.user(), rt.notifyTplGets)
 		pages.PUT("/notify-tpl/content", rt.auth(), rt.user(), rt.notifyTplUpdateContent)
 		pages.PUT("/notify-tpl", rt.auth(), rt.user(), rt.notifyTplUpdate)
