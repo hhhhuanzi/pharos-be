@@ -2,9 +2,10 @@
 #
 # dh-release.sh —— Pharos(dh) 发布打包：FE 构建 → statik → 交叉编译 → tar
 #
-# 这条链之前靠人工执行，最容易漏的一步是「重新构建 FE 并重跑 statik」：pub/ 与
-# front/statik/statik.go 都在 .gitignore 里，只 git pull 后直接 go build，拿到的是
-# 上一次遗留的 statik 产物，二进制里是旧前端。
+# 这条链之前靠人工执行，最容易漏的一步是「重新构建 FE 并重跑 statik」：pub/ 不进
+# 版本库（.gitignore 有 /pub、/dist），front/statik/statik.go 虽然也写在 .gitignore
+# 里，但它同时被 git 跟踪（与 upstream 一致），只 git pull 后直接 go build，拿到的
+# 是上一次遗留的 statik 产物，二进制里是旧前端。
 #
 # 产物形态与 v1.1.0-pharos.2 对齐：目录 n9e-dh-<version>-linux-amd64，内含
 # n9e / n9e-cli / n9e-edge / integrations/，不含 etc/（ops.yaml 由运维手工投放）。
@@ -145,9 +146,37 @@ fi
 
 # ---------------------------------------------------------- 前置校验 --
 
+# 洁净度校验的豁免名单：被 git 跟踪、但每次构建都会被本脚本重写的生成物。
+# front/statik/statik.go 写在 .gitignore 里，可它同时是被跟踪的文件（与 upstream 保持
+# 一致，这里不改它的跟踪状态），而 gitignore 对已跟踪文件无效 —— 所以每打一次包它就
+# 变脏，不豁免的话下一次打包会被上一次的构建产物挡下，防夹带闸门只能用一次。
+# pub/ 和 dist/ 是真的未被跟踪（.gitignore 的 /pub、/dist），不会出现在 porcelain 里。
+readonly BE_EXEMPT_PATHS='front/statik/statik.go'
+
+# 从 git status --porcelain 输出里滤掉豁免路径。每行形如 'XY <path>'：前两个字符是
+# 状态码（' M'、'M '、'??'、'A ' 等），第三个字符是分隔空格，路径从第 4 个字符起。
+# 只做精确路径匹配：重命名行（'R  old -> new'）和被 git 加引号的特殊路径都匹配不上，
+# 一律仍算脏 —— 宁可误拦，不可漏放。
+filter_exempt_paths() {
+  local exempt_list="$1" line path candidate skip
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    path="${line:3}"
+    skip=0
+    while IFS= read -r candidate; do
+      [[ -n "${candidate}" ]] || continue
+      if [[ "${path}" == "${candidate}" ]]; then
+        skip=1
+        break
+      fi
+    done <<<"${exempt_list}"
+    [[ "${skip}" -eq 1 ]] || printf '%s\n' "${line}"
+  done
+}
+
 check_repo() {
-  local dir="$1" name="$2" expect_commit="$3"
-  local actual_branch head_sha dirty
+  local dir="$1" name="$2" expect_commit="$3" exempt="${4:-}"
+  local actual_branch head_sha dirty kept
 
   git -C "${dir}" rev-parse --git-dir >/dev/null 2>&1 ||
     die "${name} 不是 git 仓库: ${dir}"
@@ -165,9 +194,17 @@ check_repo() {
     die "${name} HEAD 与期望不符：${head_sha}，期望以 ${expect_commit} 开头"
   fi
 
-  # 防夹带核心防线。gitignore 掉的文件（pub/、front/statik/statik.go、dist/ 等）
-  # 不会出现在 --porcelain 输出里，所以这里只会因为真正的源码改动而失败。
+  # 防夹带核心防线。未被跟踪且 gitignore 掉的目录（pub/、dist/ 等）本就不会出现在
+  # --porcelain 输出里；被跟踪的构建生成物按豁免名单逐条精确剔除；剩下的任何一行都
+  # 视为真正的源码改动，直接拒绝构建。
   dirty="$(git -C "${dir}" status --porcelain)"
+  if [[ -n "${exempt}" && -n "${dirty}" ]]; then
+    kept="$(printf '%s\n' "${dirty}" | filter_exempt_paths "${exempt}")"
+    if [[ "${kept}" != "${dirty}" ]]; then
+      log "  已豁免构建生成物（本次构建会重新生成）：$(printf '%s' "${exempt}" | tr '\n' ' ')"
+    fi
+    dirty="${kept}"
+  fi
   if [[ -n "${dirty}" ]]; then
     if [[ "${ALLOW_DIRTY}" -eq 1 ]]; then
       warn "${name} 工作区不干净，但 --allow-dirty 已开启 —— 产物不可用于正式发布"
@@ -193,7 +230,7 @@ step '前置校验'
 log "版本号: ${VERSION}"
 log "目标平台: ${TARGET_GOOS}/${TARGET_GOARCH}（本机 $(uname -s | tr '[:upper:]' '[:lower:]')）"
 
-check_repo "${REPO_ROOT}" 'BE(pharos-be)' "${EXPECT_BE_COMMIT}"
+check_repo "${REPO_ROOT}" 'BE(pharos-be)' "${EXPECT_BE_COMMIT}" "${BE_EXEMPT_PATHS}"
 check_repo "${FE_DIR}" 'FE(pharos-fe)' "${EXPECT_FE_COMMIT}"
 
 require_cmd node '安装 Node.js（建议与 CI 一致的 LTS 版本）'
