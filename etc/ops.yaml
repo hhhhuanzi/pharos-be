@@ -1,0 +1,20 @@
+# dh: 日志索引域权限点。分组名必须是 LogIndexScope（合并按分组名整组覆盖，勿复用 Explorer 等内置名）。
+# OpsYamlFile 留空时 n9e-center 默认读 {configDir}/ops.yaml，改完后需重启 center。
+ops:
+- name: LogIndexScope
+  cname: 日志索引域
+  ops:
+    - name: /log/index-patterns/raw-index
+      cname: 日志查询 - 允许手输原始索引名
+    - name: /log/index-patterns/view/turms
+      cname: 索引域 - Turms
+    - name: /log/index-patterns/view/k8s-pod
+      cname: 索引域 - K8s Pod
+    - name: /log/index-patterns/view/access-nginx
+      cname: 索引域 - Nginx 访问日志
+    - name: /log/index-patterns/view/error-nginx
+      cname: 索引域 - Nginx 错误日志
+    - name: /log/index-patterns/view/redis-slowlog
+      cname: 索引域 - Redis 慢日志
+    - name: /log/index-patterns/view/trade
+      cname: 索引域 - 交易
