@@ -355,8 +355,33 @@ cp -R "${REPO_ROOT}/integrations" "${STAGE_DIR}/integrations"
 # 刻意不放 etc/：与 v1.1.0-pharos.2 一致，ops.yaml 由运维手工投放（见 pharos-ops/UPGRADE.md）。
 
 rm -f "${TARBALL}"
-# COPYFILE_DISABLE 阻止 macOS bsdtar 写入 ._* AppleDouble 附加条目。
+
+# macOS（Ventura 起）给本地构建的可执行文件打 com.apple.provenance 扩展属性，bsdtar
+# 默认把 xattr 写成 pax 头（LIBARCHIVE.xattr.*），Linux 的 GNU tar 解包时不认识这些
+# keyword，会逐文件打印 "Ignoring unknown extended header keyword"。--no-xattrs 是
+# 真正的根治开关（实测单独加它就能让归档里的 LIBARCHIVE.xattr 归零）；
+# --no-mac-metadata 管的是另一类东西 —— 不生成 ._* AppleDouble 条目，与
+# COPYFILE_DISABLE=1 同义，留着做双保险。
+# 逐个探测而不是写死：本脚本将来可能在 Linux 上跑，GNU tar 有 --no-xattrs 但没有
+# --no-mac-metadata，写死会让整条 tar 命令因无法识别的参数直接失败。
+TAR_OPTS=()
+tar_probe_dir="$(mktemp -d)"
+: >"${tar_probe_dir}/probe"
+for opt in --no-xattrs --no-mac-metadata; do
+  if tar -cf /dev/null "${opt}" -C "${tar_probe_dir}" probe 2>/dev/null; then
+    TAR_OPTS+=("${opt}")
+  else
+    log "本机 tar 不支持 ${opt}，跳过"
+  fi
+done
+rm -rf "${tar_probe_dir}"
+log "tar 元数据参数: ${TAR_OPTS[*]:-（无）}"
+
+# --exclude 与上面两个参数不重复：参数管的是 tar 自己合成的元数据，--exclude 管的是
+# 磁盘上真实存在的垃圾文件（Finder 浏览 dist/ 留下的 .DS_Store、解压别处压缩包带进来
+# 的 ._*），两者都要留。
 COPYFILE_DISABLE=1 tar -czf "${TARBALL}" -C "${OUT_DIR}" \
+  ${TAR_OPTS[@]+"${TAR_OPTS[@]}"} \
   --exclude '.DS_Store' --exclude '._*' "${PKG_NAME}"
 
 actual_top="$(tar -tzf "${TARBALL}" |
