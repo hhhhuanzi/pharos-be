@@ -636,6 +636,11 @@ func (rt *Router) Config(r *gin.Engine) {
 		// 必须在 L283 的 pages.Use(rt.dhOperationLog()) 之后注册，审计中间件才能捕获到。
 		pages.POST("/dh/log-export/record", rt.auth(), rt.user(), rt.perm("/log/export"), rt.dhLogExportRecord)
 
+		// dh: 仪表盘收藏，见 center/router/router_dh_board_favorite.go
+		pages.GET("/dh/board-favorites", rt.auth(), rt.user(), rt.perm("/dashboards"), rt.dhBoardFavoriteGets)
+		pages.POST("/dh/board/:id/favorite", rt.auth(), rt.user(), rt.perm("/dashboards"), rt.dhBoardFavoriteAdd)
+		pages.DELETE("/dh/board/:id/favorite", rt.auth(), rt.user(), rt.perm("/dashboards"), rt.dhBoardFavoriteDel)
+
 		// dh: 服务所属团队，见 center/router/router_dh_service_team.go
 		pages.GET("/dh/service-teams/visibility", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamVisibility)
 		pages.POST("/dh/service-teams/filter", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamFilter)

@@ -65,6 +65,7 @@ func Migrate(db *gorm.DB) {
 	MigrateEsIndexPatternTable(db)
 	MigrateEsIndexPatternUniqueIndex(db)
 	MigrateDhServiceTeam(db)
+	MigrateDhBoardFavorite(db)
 }
 
 func MigrateIbexTables(db *gorm.DB) {
