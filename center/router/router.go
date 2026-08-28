@@ -226,6 +226,14 @@ func languageDetector(i18NHeaderKey string) gin.HandlerFunc {
 
 func (rt *Router) configNoRoute(r *gin.Engine, fs *http.FileSystem) {
 	r.NoRoute(func(c *gin.Context) {
+		// The SPA fallback below answers 200 + index.html for every unmatched path, which
+		// would disguise a missing or renamed API route as a successful HTML response.
+		// API paths must fail loudly instead.
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"err": "no such route: " + c.Request.Method + " " + c.Request.URL.Path, "request_id": c.GetString("trace_id")})
+			return
+		}
+
 		arr := strings.Split(c.Request.URL.Path, ".")
 		suffix := arr[len(arr)-1]
 
