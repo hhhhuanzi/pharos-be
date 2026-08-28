@@ -5,9 +5,10 @@ import (
 	"time"
 
 	"github.com/ccfos/nightingale/v6/models"
+	"github.com/ccfos/nightingale/v6/pkg/dh/serviceteam"
 	"github.com/ccfos/nightingale/v6/pkg/flashduty"
-	"github.com/ccfos/nightingale/v6/pkg/strx"
 	"github.com/ccfos/nightingale/v6/pkg/ginx"
+	"github.com/ccfos/nightingale/v6/pkg/strx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/toolkits/pkg/logger"
@@ -85,6 +86,10 @@ func (rt *Router) userGroupAdd(c *gin.Context) {
 
 	me := c.MustGet("user").(*models.User)
 
+	if err := serviceteam.ValidateTeamName(f.Name); err != nil {
+		ginx.Bomb(http.StatusBadRequest, "%s", err.Error())
+	}
+
 	ug := models.UserGroup{
 		Name:     f.Name,
 		Note:     f.Note,
@@ -116,6 +121,9 @@ func (rt *Router) userGroupPut(c *gin.Context) {
 	ug := c.MustGet("user_group").(*models.UserGroup)
 
 	if ug.Name != f.Name {
+		if err := serviceteam.ValidateTeamName(f.Name); err != nil {
+			ginx.Bomb(http.StatusBadRequest, "%s", err.Error())
+		}
 		// name changed, check duplication
 		num, err := models.UserGroupCount(rt.Ctx, "name=? and id<>?", f.Name, ug.Id)
 		ginx.Dangerous(err)

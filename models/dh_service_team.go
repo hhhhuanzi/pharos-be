@@ -8,11 +8,12 @@ import (
 	"gorm.io/gorm"
 )
 
-// DhServiceTeam 服务 ↔ user_group 多对多。服务没有自有表，用 service_name + env + user_group_id。
+// DhServiceTeam 服务 ↔ user_group。所属业务与团队等同，暂不拆。
+// 服务没有自有表，用 service_name + env + user_group_id。
 //
 // env 空字符串 = 服务级默认（覆盖该服务所有环境），本期手动绑定都写这个。
 // source 预留给发布系统：本期只写 manual；以后 release 覆盖同一行即可。
-// 同一 service_name 可以挂多个 user_group（多行）。
+// 写入时一个 service_name 只能挂一个 user_group；存量脏数据读侧不猜第一条。
 type DhServiceTeam struct {
 	Id          int64  `json:"id" gorm:"primaryKey;autoIncrement"`
 	ServiceName string `json:"service_name" gorm:"type:varchar(255);not null;uniqueIndex:idx_dh_svc_team_name_env_gid;default:''"`
@@ -91,6 +92,9 @@ func DhServiceTeamAdd(ctx *ctx.Context, row *DhServiceTeam) error {
 	if row.CreatedBy == "" {
 		row.CreatedBy = row.UpdatedBy
 	}
+	if err := assertServiceUnbound(ctx, nil, row.ServiceName, row.Env, row.UserGroupId); err != nil {
+		return err
+	}
 	return DB(ctx).Create(row).Error
 }
 
@@ -116,10 +120,24 @@ func DhServiceTeamReplaceForGroup(ctx *ctx.Context, groupId int64, names []strin
 		}
 
 		now := time.Now().Unix()
+		var adding []string
 		for _, n := range want {
 			if _, ok := have[n]; ok {
 				continue
 			}
+			adding = append(adding, n)
+		}
+		if len(adding) > 0 {
+			if err := assertGroupNameValid(tx, groupId); err != nil {
+				return err
+			}
+			for _, n := range adding {
+				if err := assertServiceUnboundTx(tx, n, "", groupId); err != nil {
+					return err
+				}
+			}
+		}
+		for _, n := range adding {
 			row := DhServiceTeam{
 				ServiceName: n,
 				Env:         "",
@@ -153,6 +171,9 @@ func DhServiceTeamReplaceForService(ctx *ctx.Context, name string, groupIds []in
 		return nil
 	}
 	want := uniquePositiveIDs(groupIds)
+	if len(want) > 1 {
+		return serviceteam.ErrMultipleTeams
+	}
 	wantSet := make(map[int64]struct{}, len(want))
 	for _, id := range want {
 		wantSet[id] = struct{}{}
@@ -169,6 +190,11 @@ func DhServiceTeamReplaceForService(ctx *ctx.Context, name string, groupIds []in
 		}
 
 		now := time.Now().Unix()
+		if len(want) == 1 {
+			if err := assertGroupNameValid(tx, want[0]); err != nil {
+				return err
+			}
+		}
 		for _, id := range want {
 			if _, ok := have[id]; ok {
 				continue
@@ -255,4 +281,40 @@ func uniquePositiveIDs(ids []int64) []int64 {
 		out = append(out, id)
 	}
 	return out
+}
+
+func assertGroupNameValid(tx *gorm.DB, groupId int64) error {
+	var ug UserGroup
+	if err := tx.Where("id = ?", groupId).Take(&ug).Error; err != nil {
+		return err
+	}
+	return serviceteam.ValidateTeamName(ug.Name)
+}
+
+func assertServiceUnbound(ctx *ctx.Context, tx *gorm.DB, name, env string, groupId int64) error {
+	db := DB(ctx)
+	if tx != nil {
+		db = tx
+	}
+	return assertServiceUnboundTx(db, name, env, groupId)
+}
+
+func assertServiceUnboundTx(tx *gorm.DB, name, env string, groupId int64) error {
+	name = serviceteam.NormalizeName(name)
+	env = serviceteam.NormalizeEnv(env)
+	var lst []DhServiceTeam
+	if err := tx.Where("service_name = ? and env = ? and user_group_id <> ?", name, env, groupId).Find(&lst).Error; err != nil {
+		return err
+	}
+	if len(lst) == 0 {
+		return nil
+	}
+	otherName := lst[0].UserGroupName
+	if otherName == "" {
+		var ug UserGroup
+		if err := tx.Where("id = ?", lst[0].UserGroupId).Take(&ug).Error; err == nil {
+			otherName = ug.Name
+		}
+	}
+	return serviceteam.ErrAlreadyBound(name, otherName)
 }

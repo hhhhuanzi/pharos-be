@@ -363,7 +363,9 @@ func (rt *Router) dhServiceTeamByGroupPut(c *gin.Context) {
 		ginx.Bomb(http.StatusBadRequest, "user group not found")
 	}
 
-	ginx.Dangerous(models.DhServiceTeamReplaceForGroup(rt.Ctx, f.UserGroupId, f.ServiceNames, user.Username))
+	if err := models.DhServiceTeamReplaceForGroup(rt.Ctx, f.UserGroupId, f.ServiceNames, user.Username); err != nil {
+		ginx.Bomb(http.StatusBadRequest, "%s", err.Error())
+	}
 
 	lst, err := models.DhServiceTeamGetsByGroupId(rt.Ctx, f.UserGroupId)
 	ginx.Dangerous(err)
@@ -399,15 +401,33 @@ func (rt *Router) dhServiceTeamPut(c *gin.Context) {
 	if len(ids) == 0 && f.UserGroupId > 0 {
 		ids = []int64{f.UserGroupId}
 	}
+	uniq := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	if len(uniq) > 1 {
+		ginx.Bomb(http.StatusBadRequest, "%s", serviceteam.ErrMultipleTeams.Error())
+	}
+	for _, id := range uniq {
 		ug, err := models.UserGroupGetById(rt.Ctx, id)
 		ginx.Dangerous(err)
 		if ug == nil {
 			ginx.Bomb(http.StatusBadRequest, "user group not found")
 		}
+		if err := serviceteam.ValidateTeamName(ug.Name); err != nil {
+			ginx.Bomb(http.StatusBadRequest, "%s", err.Error())
+		}
 	}
 
-	ginx.Dangerous(models.DhServiceTeamReplaceForService(rt.Ctx, name, ids, user.Username))
+	ginx.Dangerous(models.DhServiceTeamReplaceForService(rt.Ctx, name, uniq, user.Username))
 	lst, err := models.DhServiceTeamGetsByNameEnv(rt.Ctx, name, "")
 	ginx.Dangerous(err)
 	ginx.Dangerous(models.FillDhServiceTeamGroupNames(rt.Ctx, lst))
