@@ -78,6 +78,7 @@ func CanManage(admin bool, roles []string, hasManagePerm bool) bool {
 
 // ResolveBindings 返回该服务在当前 env 上生效的全部团队。
 // 先收集精确 (name, env)，没有再回落到服务级 (name, "")。
+// 写入已是一对一；这里仍可能返回多条（存量脏数据），调用方不要猜第一条。
 func ResolveBindings(bindings []Binding, name, env string) []Binding {
 	name = NormalizeName(name)
 	env = NormalizeEnv(env)
@@ -125,6 +126,34 @@ func CanSee(viewAll bool, groupIDs map[int64]struct{}, bindings []Binding, name,
 			continue
 		}
 		if _, ok := groupIDs[b.UserGroupID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// CanSeeAnyEnv 在拿不到环境维度时判定服务名是否可见：对同一服务名的所有 env 绑定做 OR，
+// 任意一条与我的组有交集即可见。
+//
+// CanSee 传 env="" 时 ResolveBindings 只会收 env=="" 的行，服务若只有 env="prod" 的绑定会漏判；
+// 拓扑指标（by 子句里没有 env）与 trace 详情（响应里没有 env）都属于这种场景。
+func CanSeeAnyEnv(viewAll bool, groupIDs map[int64]struct{}, bindings []Binding, name string) bool {
+	if viewAll {
+		return true
+	}
+	if CanSee(false, groupIDs, bindings, name, "") {
+		return true
+	}
+	normalized := NormalizeName(name)
+	for _, binding := range bindings {
+		if NormalizeName(binding.ServiceName) != normalized {
+			continue
+		}
+		env := NormalizeEnv(binding.Env)
+		if env == "" {
+			continue
+		}
+		if CanSee(false, groupIDs, bindings, name, env) {
 			return true
 		}
 	}

@@ -111,6 +111,30 @@ func TestCanSeeAnyTeam(t *testing.T) {
 	}
 }
 
+func TestCanSeeAnyEnvOrsOverEnvBindings(t *testing.T) {
+	bindings := []Binding{
+		{ServiceName: "svc", Env: "prod", UserGroupID: 3},
+		{ServiceName: "other", Env: "", UserGroupID: 9},
+	}
+	groups := GroupIDSet([]int64{3})
+
+	if CanSee(false, groups, bindings, "svc", "") {
+		t.Fatal("env=\"\" should not match an env-scoped binding")
+	}
+	if !CanSeeAnyEnv(false, groups, bindings, "svc") {
+		t.Fatal("any-env OR should see svc")
+	}
+	if CanSeeAnyEnv(false, groups, bindings, "other") {
+		t.Fatal("other belongs to a foreign group")
+	}
+	if CanSeeAnyEnv(false, groups, bindings, "unbound") {
+		t.Fatal("unbound service must stay invisible")
+	}
+	if !CanSeeAnyEnv(true, nil, nil, "anything") {
+		t.Fatal("viewAll sees everything")
+	}
+}
+
 func TestFilterRefs(t *testing.T) {
 	bindings := []Binding{
 		{ServiceName: "turms-business-service", Env: "", UserGroupID: 10},

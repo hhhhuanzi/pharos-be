@@ -643,6 +643,10 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.GET("/dh/service-teams/by-group", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamByGroupGet)
 		pages.PUT("/dh/service-teams/by-group", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamByGroupPut)
 		pages.PUT("/dh/service-teams", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceTeamPut)
+		pages.GET("/dh/service-graph", rt.auth(), rt.user(), rt.perm("/service"), rt.dhServiceGraph)                             // 见 center/router/router_dh_service_graph.go
+		pages.GET("/dh/trace/:trace_id", rt.auth(), rt.user(), rt.dhPermAny("/trace/explorer", "/service"), rt.dhTraceGet)       // 见 center/router/router_dh_trace.go
+		pages.GET("/dh/trace-summaries", rt.auth(), rt.user(), rt.dhPermAny("/trace/explorer", "/service"), rt.dhTraceSummaries) // 见 center/router/router_dh_trace_search.go
+		pages.GET("/dh/trace-search", rt.auth(), rt.user(), rt.dhPermAny("/trace/dependencies", "/service"), rt.dhTraceSearch)   // 见 center/router/router_dh_trace_search.go
 
 		pages.GET("/notify-tpls", rt.auth(), rt.user(), rt.notifyTplGets)
 		pages.PUT("/notify-tpl/content", rt.auth(), rt.user(), rt.notifyTplUpdateContent)

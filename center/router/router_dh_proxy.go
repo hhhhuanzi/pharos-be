@@ -25,6 +25,10 @@ var anonymousProxyWarnOnce sync.Once
 func (rt *Router) dsProxyGuarded(c *gin.Context) {
 	dsId := ginx.UrlParamInt64(c, "id")
 
+	// tracing 类数据源的 trace 读取路径一律不走这条代理（见 router_dh_proxy_tracing.go）。放在匿名
+	// 放行判定之前：匿名分支同样不能成为读 trace 的口子。
+	dhGuardTracingProxyPath(rt.DatasourceCache.GetById(dsId), c.Param("url"))
+
 	if rt.Center.DhProxyGuard.AllowAnonymousProxy(dsId, c.Request.Method) {
 		anonymousProxyWarnOnce.Do(func() {
 			logger.Warningf("dh: anonymous datasource proxy is enabled by Center.DhProxyGuard, "+
