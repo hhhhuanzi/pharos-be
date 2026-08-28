@@ -72,6 +72,7 @@ queries.active
 .playwright-mcp
 
 /n9e-*
+/n9e.bak*
 /n9e_test
 n9e.sql
 *.bak
