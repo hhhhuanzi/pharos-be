@@ -98,9 +98,11 @@ type SpanRef struct {
 
 // Span 是转换后的 span，字段对应前端 TraceSpanData 里摘要真正会读的部分。
 type Span struct {
-	SpanID    string
-	TraceID   string
-	Service   string
+	SpanID  string
+	TraceID string
+	Service string
+	// Env 是 resource 属性 deployment.environment.name 的值，未上报该属性时为空串。
+	Env       string
 	Operation string
 	// StartTime / Duration 单位是微秒，与瀑布图一致。
 	StartTime int64
@@ -149,10 +151,13 @@ func DecodeTraces(body []byte) ([]Trace, error) {
 				resourceTags = attributesToTags(rs.Resource.Attributes)
 			}
 			serviceName := "unknown"
+			env := ""
 			for _, tag := range resourceTags {
-				if tag.Key == serviceNameAttr {
+				switch tag.Key {
+				case serviceNameAttr:
 					serviceName = tag.Value
-					break
+				case envAttr:
+					env = tag.Value
 				}
 			}
 
@@ -176,7 +181,7 @@ func DecodeTraces(body []byte) ([]Trace, error) {
 					if _, ok := byTrace[traceID]; !ok {
 						order = append(order, traceID)
 					}
-					byTrace[traceID] = append(byTrace[traceID], toSpan(span, serviceName, scopeTags))
+					byTrace[traceID] = append(byTrace[traceID], toSpan(span, serviceName, env, scopeTags))
 				}
 			}
 		}
@@ -191,7 +196,14 @@ func DecodeTraces(body []byte) ([]Trace, error) {
 
 const serviceNameAttr = "service.name"
 
-func toSpan(span otlpSpan, serviceName string, scopeTags []Tag) Span {
+// envAttr 与 tracefetch.EnvAttributeKey 是同一个键，查询侧用它收窄、这里用它填摘要的环境列。
+// 本包是纯转换层（pharos-fe 的移植），不引 HTTP 客户端包，所以键名在这里再写一份；
+// env_test.go 断言两者相等，防止哪天只改了一侧。
+const envAttr = "deployment.environment.name"
+
+// toSpan 的 env 来自 resource 属性，所以同一批 resourceSpans 下的 span 共享一个值；调用方在解
+// resource 时已经取好，这里不再重复扫 tags。
+func toSpan(span otlpSpan, serviceName string, env string, scopeTags []Tag) Span {
 	traceID := strings.ToLower(span.TraceID)
 	parents := make([]SpanRef, 0, 1+len(span.Links))
 	if !isZeroOrEmptyID(span.ParentSpanID) {
@@ -242,6 +254,7 @@ func toSpan(span otlpSpan, serviceName string, scopeTags []Tag) Span {
 		SpanID:    strings.ToLower(span.SpanID),
 		TraceID:   traceID,
 		Service:   serviceName,
+		Env:       env,
 		Operation: operation,
 		StartTime: start,
 		Duration:  duration,
@@ -345,6 +358,12 @@ type TraceSummary struct {
 	ErrorSpanCount  int              `json:"errorSpanCount"`
 	OrphanSpanCount int              `json:"orphanSpanCount"`
 	Services        []ServiceSummary `json:"services"`
+	// Envs 是这条 trace 涉及的环境，按首次出现顺序去重，空串（未上报该属性的 span）不计入。
+	//
+	// 做成数组而不是单值：正常一条 trace 只有一个环境（服务间调用不跨环境，DB 不上报 span，所以
+	// 共用 MySQL 也不会把两个环境串进同一条 trace），但数组是廉价的兜底 —— 真出现跨环境时列表能
+	// 如实标注，而不用改协议。空数组表示这批 span 都没带环境属性。
+	Envs []string `json:"envs"`
 }
 
 // isErrorSpan 沿用 Jaeger/OpenTracing 约定：error 属性有真值即失败。
@@ -415,8 +434,16 @@ func Summarize(trace Trace) *TraceSummary {
 	)
 	serviceOrder := make([]string, 0, 8)
 	byService := make(map[string]*ServiceSummary)
+	envs := make([]string, 0, 1)
+	seenEnvs := make(map[string]struct{}, 1)
 
 	for _, span := range spans {
+		if span.Env != "" {
+			if _, ok := seenEnvs[span.Env]; !ok {
+				seenEnvs[span.Env] = struct{}{}
+				envs = append(envs, span.Env)
+			}
+		}
 		if span.StartTime < startTimeUs {
 			startTimeUs = span.StartTime
 		}
@@ -491,6 +518,7 @@ func Summarize(trace Trace) *TraceSummary {
 		ErrorSpanCount:  errorSpanCount,
 		OrphanSpanCount: orphanSpanCount,
 		Services:        services,
+		Envs:            envs,
 	}
 }
 

@@ -22,7 +22,9 @@ type FindQuery struct {
 	DurationMin string
 	DurationMax string
 	NumTraces   int
-	// Attributes 是属性过滤（富化的 hint 走这里），透传成 URL 编码的 JSON string map。
+	// Attributes 是属性过滤（富化的 hint、环境收窄都走这里），透传成 URL 编码的 JSON string map。
+	// 上游会把它下推到 resource / process tags，多个 key 之间是 AND，所以 env 与 hint 可以并存。
+	// 环境维度请用 WithEnv 拼装，不要自己写属性名（见 env.go）。
 	Attributes map[string]string
 }
 
@@ -31,8 +33,13 @@ type FindQuery struct {
 // 参数名用 api_v3 原始的 snake_case：这是 api_v3 proto 注释里一直在用的写法，所有已发布的
 // Jaeger v2.x 都认；很近期的 Jaeger 才把 camelCase 定为「规范」名并把 snake_case 标为兼容别名。
 //
-// 结果数量字段在 proto 里从 num_traces 改名成 search_depth，而 grpc-gateway 会直接拒绝未知的
-// query 参数，所以不能两个都发。这里只打 /api/v3/traces，沿用历史的 num_traces。
+// 结果数量字段在 proto 里从 num_traces 改名成 search_depth，这里只打 /api/v3/traces，沿用历史的
+// num_traces。
+//
+// 注意别按「未知参数会被拒绝」来推断上游认不认某个参数：实测塞一个虚构的 query.bogus_param=1，
+// 上游返回 HTTP 200 并照常给数据，未知 query 参数是被静默忽略的。所以「发错名字」不会报错，只会
+// 悄悄不生效 —— 参数名是否生效必须靠结果差异来验证（例如 query.attributes 带错值返回 0 条、带对
+// 值返回数据），不能靠「没报错」当作生效。
 func (q FindQuery) findTracesParams() (url.Values, error) {
 	values := url.Values{}
 	values.Set("query.service_name", q.Service)
