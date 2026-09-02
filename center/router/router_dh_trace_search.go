@@ -88,6 +88,10 @@ func dhParseTraceSearchRequest(c *gin.Context) dhTraceSearchRequest {
 		numTraces = dhTraceSearchDefaultNumTraces
 	}
 
+	// env 是查询收窄，不是判权维度：空值走软降级（不加过滤条件、跨环境结果照常返回），因为链路是
+	// 排障主路径，把 tab 变成空白比混着几个环境更难用。判权仍然只看 service，见下方 dhTraceVisible。
+	env := ginx.QueryStr(c, "env", "")
+
 	return dhTraceSearchRequest{
 		datasourceID: dsID,
 		numTraces:    numTraces,
@@ -99,7 +103,7 @@ func dhParseTraceSearchRequest(c *gin.Context) dhTraceSearchRequest {
 			DurationMin:  strings.TrimSpace(ginx.QueryStr(c, "duration_min", "")),
 			DurationMax:  strings.TrimSpace(ginx.QueryStr(c, "duration_max", "")),
 			NumTraces:    numTraces,
-			Attributes:   dhParseTraceAttributes(c),
+			Attributes:   tracefetch.WithEnv(dhParseTraceAttributes(c), env),
 		},
 	}
 }
@@ -141,7 +145,10 @@ func (rt *Router) dhTraceFindTraces(c *gin.Context, req dhTraceSearchRequest) []
 		ginx.Bomb(http.StatusBadRequest, "datasource is not a tracing datasource")
 	}
 
-	// service 可见性：trace 查询里拿不到环境维度，与拓扑、trace 详情一样按服务名对所有 env 做 OR。
+	// service 可见性：与拓扑、trace 详情一样按服务名对所有 env 做 OR。
+	//
+	// 请求里现在带 env 了（收窄查询用），但判权刻意不看它：dh_service_team 虽有 env 列，当前一律
+	// 写空串，按 env 判权只会误拒。收窄查询不可能放宽权限，所以这里保持只问「service 对我可见吗」。
 	visible, err := rt.dhTraceVisible(c, []string{req.query.Service})
 	ginx.Dangerous(err)
 	if !visible {
