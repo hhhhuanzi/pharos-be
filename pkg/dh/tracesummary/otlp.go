@@ -157,7 +157,7 @@ func DecodeTraces(body []byte) ([]Trace, error) {
 				case serviceNameAttr:
 					serviceName = tag.Value
 				case envAttr:
-					env = tag.Value
+					env = strings.TrimSpace(tag.Value)
 				}
 			}
 
@@ -201,8 +201,17 @@ const serviceNameAttr = "service.name"
 // env_test.go 断言两者相等，防止哪天只改了一侧。
 const envAttr = "deployment.environment.name"
 
-// toSpan 的 env 来自 resource 属性，所以同一批 resourceSpans 下的 span 共享一个值；调用方在解
-// resource 时已经取好，这里不再重复扫 tags。
+func envFromTags(tags []Tag) string {
+	for _, tag := range tags {
+		if tag.Key == envAttr {
+			return strings.TrimSpace(tag.Value)
+		}
+	}
+	return ""
+}
+
+// toSpan 的 env 优先用 resource 属性（同一批 resourceSpans 共享）。Jaeger 偶尔只把该键落在
+// span attributes / process tags 等价位置，resource 为空时再扫一遍 span tags，避免摘要列空白。
 func toSpan(span otlpSpan, serviceName string, env string, scopeTags []Tag) Span {
 	traceID := strings.ToLower(span.TraceID)
 	parents := make([]SpanRef, 0, 1+len(span.Links))
@@ -225,6 +234,9 @@ func toSpan(span otlpSpan, serviceName string, env string, scopeTags []Tag) Span
 	}
 
 	tags := attributesToTags(span.Attributes)
+	if env == "" {
+		env = envFromTags(tags)
+	}
 	if span.Kind != nil {
 		if name, ok := spanKindNames[*span.Kind]; ok && !hasTagKey(tags, "span.kind") {
 			tags = append(tags, Tag{Key: "span.kind", Value: name})

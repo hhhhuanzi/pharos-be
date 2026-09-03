@@ -137,6 +137,56 @@ func TestSummarizeSkipsMissingEnv(t *testing.T) {
 
 // 全都没带环境属性时是空数组而不是 nil：JSON 里要序列化成 []，前端拿到的就是「没有环境信息」，
 // 而不是需要额外判空的 null。
+// Jaeger 有时只在 span attributes 上带这个键（resource 没有），摘要列仍要能填出来。
+func TestDecodeTracesFallsBackToSpanAttributeEnv(t *testing.T) {
+	body := `{
+  "result": {
+    "resourceSpans": [
+      {
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "gateway" } }
+          ]
+        },
+        "scopeSpans": [
+          {
+            "spans": [
+              {
+                "traceId": "AABB",
+                "spanId": "01",
+                "name": "GET /orders",
+                "startTimeUnixNano": "1700000000000000000",
+                "endTimeUnixNano": "1700000000900000000",
+                "attributes": [
+                  { "key": "deployment.environment.name", "value": { "stringValue": "pre" } }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}`
+	traces, err := DecodeTraces([]byte(body))
+	if err != nil {
+		t.Fatalf("DecodeTraces: %v", err)
+	}
+	if len(traces) != 1 || len(traces[0].Spans) != 1 {
+		t.Fatalf("traces = %+v, want 1 trace / 1 span", traces)
+	}
+	if traces[0].Spans[0].Env != "pre" {
+		t.Fatalf("Env = %q, want pre（span attribute 回退）", traces[0].Spans[0].Env)
+	}
+	summary := Summarize(traces[0])
+	if summary == nil {
+		t.Fatal("Summarize() = nil")
+	}
+	if len(summary.Envs) != 1 || summary.Envs[0] != "pre" {
+		t.Fatalf("Envs = %v, want [pre]", summary.Envs)
+	}
+}
+
 func TestSummarizeEnvsIsEmptySliceWhenAbsent(t *testing.T) {
 	trace := Trace{
 		TraceID: "aabb",
