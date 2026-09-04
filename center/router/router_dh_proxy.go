@@ -20,14 +20,25 @@ import (
 //
 // 这里把该路由的唯一 handler 换成 dsProxyGuarded，官方文件只保留一行注册；匿名放行面
 // 由二开配置 Center.DhProxyGuard 单独控制（默认全关），不再跟着 PromQuerier 走。
+//
+// 仪表盘限时分享：路由上挂 boardTokenDetect()（只写 context、无/无效 token 不 401）。
+// 有效 token 跳过登录，交给官方 dsProxy 做「数据源属于这块板」+ 只读路径白名单；
+// 不要在这里复制那段校验。无 token 仍走下面的登录 + 数据源权限（1.2.1 收紧）。
 var anonymousProxyWarnOnce sync.Once
 
 func (rt *Router) dsProxyGuarded(c *gin.Context) {
 	dsId := ginx.UrlParamInt64(c, "id")
 
 	// tracing 类数据源的 trace 读取路径一律不走这条代理（见 router_dh_proxy_tracing.go）。放在匿名
-	// 放行判定之前：匿名分支同样不能成为读 trace 的口子。
+	// 放行判定之前：匿名 / 分享 token 分支同样不能成为读 trace 的口子。
 	dhGuardTracingProxyPath(rt.DatasourceCache.GetById(dsId), c.Param("url"))
+
+	// dh: 有效 board 分享 token 已由 boardTokenDetect 写入 context。跳过 auth/user，
+	// 官方 dsProxy 看到 board_share_bid 后会做板内数据源 + 只读路径校验。
+	if _, ok := boardTokenBid(c); ok {
+		rt.dsProxy(c)
+		return
+	}
 
 	if rt.Center.DhProxyGuard.AllowAnonymousProxy(dsId, c.Request.Method) {
 		anonymousProxyWarnOnce.Do(func() {

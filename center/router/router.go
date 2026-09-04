@@ -293,8 +293,10 @@ func (rt *Router) Config(r *gin.Engine) {
 		pages.Use(rt.dhOperationLog())
 
 		pages.DELETE("/datasource/series", rt.auth(), rt.admin(), rt.deleteDatasourceSeries)
-		// dh: 代理路由不再跟随 PromQuerier 分叉，鉴权与匿名放行见 router_dh_proxy.go
-		pages.Any("/proxy/:id/*url", rt.dsProxyGuarded)
+		// dh: 代理路由不再跟随 PromQuerier 分叉；boardTokenDetect 只写 context、不拦截。
+		// 有有效分享 token 时 dsProxyGuarded 跳过登录，交给官方 dsProxy 做板内数据源+只读路径。
+		// 无 token 保持 1.2.1 的登录 + 数据源权限，见 router_dh_proxy.go。
+		pages.Any("/proxy/:id/*url", rt.boardTokenDetect(), rt.dsProxyGuarded)
 		if rt.Center.AnonymousAccess.PromQuerier {
 			pages.POST("/v2/query-batch", rt.queryBatchV2)
 			pages.POST("/query-range-batch", rt.promBatchQueryRange)
@@ -335,7 +337,7 @@ func (rt *Router) Config(r *gin.Engine) {
 		} else {
 			// 仪表盘限时分享：带有效 board 分享 token 的匿名请求可走以下查询接口，
 			// 数据源被收敛到板内引用集合（见 router_board_share.go），其余照常登录鉴权
-			// dh: /proxy 仍只走上面的 dsProxyGuarded，不在此再注册官方匿名/分享 token 代理。
+			// dh: /proxy 已在上面统一挂 boardTokenDetect + dsProxyGuarded，此处不再重复注册。
 			pages.POST("/v2/query-batch", rt.boardTokenDetect(), skipIfBoardToken(rt.auth()), skipIfBoardToken(rt.user()), rt.queryBatchV2)
 			pages.POST("/query-range-batch", rt.boardTokenDetect(), skipIfBoardToken(rt.auth()), rt.promBatchQueryRange)
 			pages.POST("/query-instant-batch", rt.boardTokenDetect(), skipIfBoardToken(rt.auth()), rt.promBatchQueryInstant)
