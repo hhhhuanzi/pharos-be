@@ -38,6 +38,11 @@
 - **不必**为只读链路 MVP 新增 `RegisterDatasource` / 告警 eval
 - 若日后需要服务端 GraphQL 编排，再新增 `center/router/router_dh_*.go`
 
+## 测试与验证
+
+- **测试范围与改动范围匹配**：日常小需求、小 bug 修复只跑与改动直接相关的包，例如只改了 `center/router` 就 `go test ./center/router/...`，必要时用 `-run` 收敛到单个用例。
+- 完整、全面的测试（`go test ./...`、`make all` 等）只在版本发布前跑；平时全量既慢又费 token，确有需要时先问。
+
 ## Commit 与版本对齐
 
 - 前缀建议：`feat(dh):` / `fix(dh):` / `chore(dh):`
